@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ltb-casebuilder"
+version = "0.1.0"
+description = "Period-specific AMS cases from real regional hourly load, as an LLM_LTB route extension"
+readme = "README.md"
+requires-python = ">=3.10"
+# The data layer (casebuilder.casedata) needs only numpy + pandas. The rest also needs
+# ltbams and LLM_LTB's LLM_AMS directory on PYTHONPATH (LLM_LTB is not pip-installable).
+dependencies = ["numpy", "pandas", "pydantic>=2"]
+
+[project.optional-dependencies]
+ltb = ["ltbams>=1.0", "langchain-core", "matplotlib", "openpyxl"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["casebuilder*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

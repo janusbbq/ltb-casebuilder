@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.DS_Store
+
+# outputs of the builder (default AMS_PERIOD_DIR is ./data/period_cases)
+data/
+generated/
