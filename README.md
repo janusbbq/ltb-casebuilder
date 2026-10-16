@@ -47,6 +47,18 @@ become its own package later.
 
 ## Setup
 
+**Requires LLM_LTB with route extensions** (`LLM_AMS/agent/extensions.py`). Until that is
+merged into [CURENT/LLM_LTB](https://github.com/CURENT/LLM_LTB), get it from the
+`jian-han/route-extensions` branch of [janusbbq/LLM_LTB](https://github.com/janusbbq/LLM_LTB):
+
+```bash
+cd ~/projects/utk
+git clone https://github.com/janusbbq/LLM_LTB.git
+git -C LLM_LTB checkout jian-han/route-extensions
+git clone https://github.com/janusbbq/ltb-casebuilder.git
+git clone https://github.com/enliten/ENLITEN-Grid-Econ-Data.git      # data, ~240 MB
+```
+
 Directory layout this repo assumes by default:
 
 ```
@@ -56,9 +68,10 @@ Directory layout this repo assumes by default:
 └── ENLITEN-Grid-Econ-Data/      # git clone https://github.com/enliten/ENLITEN-Grid-Econ-Data.git
 ```
 
-Use LLM_LTB's environment (`conda activate llm-ams`). LLM_LTB is not pip-installable, so
-both directories go on `PYTHONPATH`. Other locations: `ENLITEN_DATA_DIR` for the dataset,
-`LTB_LLM_AMS` (tests only) for LLM_LTB's `LLM_AMS` directory.
+Use LLM_LTB's environment (`conda activate llm-ams`; see LLM_LTB's README for installing it).
+Install this package into it (below) or put it on `PYTHONPATH`; LLM_LTB itself is not
+pip-installable and is run from its `LLM_AMS` directory. Other locations: `ENLITEN_DATA_DIR`
+for the dataset, `LTB_LLM_AMS` (tests only) for LLM_LTB's `LLM_AMS` directory.
 
 ## Use
 
@@ -190,3 +203,8 @@ EIA Hourly Electric Grid Monitor exports shipped in
 [ENLITEN-Grid-Econ-Data](https://github.com/enliten/ENLITEN-Grid-Econ-Data) (Zhang & Li,
 *Scientific Data* 10, 646, 2023), regions NE, NY, CA, NW, SW, 2015-07 to 2022-06. The dataset
 is GPL v3 and is not vendored here; this package only reads its files.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The ENLITEN-Grid-Econ-Data dataset it reads is GPL v3 and is
+not included; `ltbams` (LTB AMS), which it runs on, is GPL v3.
