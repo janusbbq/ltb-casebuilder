@@ -5,7 +5,7 @@ some days of a month — and use them from the [LLM_LTB](https://github.com/CURE
 agent as an extra route, `case_build`:
 
 ```
-"Build the IEEE39 case for July 2020 and run ED"      "生成2020年1月的ieee39算例并运行ED"
+"Build the IEEE39 case for July 2020 and run ED" 
 ```
 
 It plugs into LLM_LTB through the route-extension interface (`agent.extensions`), so LLM_LTB's
