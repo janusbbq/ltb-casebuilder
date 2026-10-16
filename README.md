@@ -62,7 +62,19 @@ both directories go on `PYTHONPATH`. Other locations: `ENLITEN_DATA_DIR` for the
 
 ## Use
 
-**From the LLM_LTB agent** (CLI or web), run from `LLM_LTB/LLM_AMS`:
+**One-time setup (recommended)** — then start LLM_LTB as usual, no `export` needed:
+
+```bash
+python -m pip install -e ~/projects/utk/ltb-casebuilder --no-deps   # in LLM_LTB's env
+echo 'LTB_EXTENSIONS=casebuilder.ltb_plugin:CASE_BUILD' >> ~/projects/utk/LLM_LTB/LLM_AMS/.env
+```
+
+LLM_LTB's `agent/core.py` loads `.env` before the workflow is built, so both `python main.py`
+and the web server pick the plugin up. A value exported in the shell wins over `.env`
+(`export LTB_EXTENSIONS=` disables it for one run). Undo: `pip uninstall ltb-casebuilder`
+and delete the line.
+
+**Without installing** (CLI or web), run from `LLM_LTB/LLM_AMS`:
 
 ```bash
 export PYTHONPATH=~/projects/utk/ltb-casebuilder:.
@@ -72,7 +84,7 @@ python main.py                                   # or: python -m uvicorn web.bac
 
 Then e.g. `Build the IEEE39 case for July 2020`, `生成2020年1月的ieee39算例并运行ED`.
 Note: LLM_LTB's web `/api/chat` runs a parameter-control pre-check before the agent; with a
-small local model it may reject the request before it reaches `case_build`.
+small local model it may reject the request before it reaches `case_build` (see Limitations).
 
 **Without the LLM** (same code path), from `LLM_LTB/LLM_AMS`:
 
@@ -83,12 +95,83 @@ python -m casebuilder.cli --year 2020 --month 7 --run ED
 python -m casebuilder.cli --year 2020 --compare 1 7        # tables + figure for two months
 ```
 
-Outputs go to `./data/period_cases/` (`AMS_PERIOD_DIR` to override) — not `generated/`,
-which LLM_LTB's web server publishes at `/generated`.
+### What to ask
 
-**Checks** written to `<case_id>.period.json`: `coverage`, `source_values` (outliers),
-`capacity` (a period peak above online Pmax is refused, nothing is written),
-`min_generation`, `roundtrip` (the reloaded xlsx reproduces the profile).
+| Request | What happens |
+|---|---|
+| `Build the IEEE39 case for July 2020` | builds and loads the 744-slot case, switches the routine to ED |
+| `Build the IEEE39 case for July 2020 and run ED` / `生成2020年7月的ieee39算例并运行ED` | builds, then solves ED in the same turn |
+| `生成2020年1月的ieee39算例，前3天` | the first 3 days of January (72 slots) |
+| `Build a 2019 case from New England load` | the whole year (8760 slots — untested at that size, see Limitations) |
+| `July 2020 in UTC`, `… from new york load`, `… peak 4,000 MW`, `… scaled to the 2019 peak` | optional fields; only used when you say them |
+
+Year, month and days are read from your words by a deterministic parser, which overrides
+the LLM. Optional fields (time zone, region, base case, peak, reference year) are used only
+when they appear in the request — otherwise the defaults apply (local time, New England,
+`ieee39_uced`, base-case total load, the same year).
+
+### Example reply
+
+```
+Built and loaded case `ieee39_uced_NE_2020_07`
+- Period: 2020-07 — 744 hourly slots, 2020-07-01 00:00-0400 to 2020-07-31 23:00-0400
+- Load shape: New England (ISO-NE) hourly demand (EIA Grid Monitor), distributed to 19 loads
+- System load: mean 3108 MW, peak 4685 MW, min 2010 MW (scale 0.1897 × regional MW; shape is
+  real, magnitude is the test system's)
+- Checks: ✓ coverage; ✓ source_values; ✓ capacity; ✓ min_generation; ✓ roundtrip
+- Case file: …/data/period_cases/ieee39_uced_NE_2020_07.xlsx
+```
+
+In the web app the built case then appears in the sidebar as `ieee39_uced_NE_2020_07 · 744 h`.
+
+### Output files
+
+Under `./data/period_cases/` (`AMS_PERIOD_DIR` to override) — not `generated/`, which
+LLM_LTB's web server publishes at `/generated`:
+
+| File | Contents |
+|---|---|
+| `<case_id>.xlsx` | the AMS case: base case + `EDSlot` / `EDSlotLoad` / `UCSlot` / … rebuilt for the period |
+| `<case_id>.profile.csv` | hour, local timestamp, one MW column per load — what went into the case |
+| `<case_id>.period.json` | the record of how it was made (below) |
+| `<case_id>.manifest.json` | LLM_LTB `week_case`'s own manifest: hashes and round-trip residual |
+
+`<case_id>.period.json` keys: `spec` (the request as understood), `period` (start, end, time
+zone, slots), `provenance` (EIA series id, URL, source-file sha256, transformation formula),
+`scale` (`peak_mw`, reference year and its regional peak), `stats` (system / regional mean,
+peak, min MW), `checks`, `notes`, `files` (paths + hashes).
+
+**Checks**: `coverage` (every hour present; otherwise refused), `source_values` (outliers
+vs the period median), `capacity` (a period peak above online Pmax is refused, nothing is
+written), `min_generation` (period minimum vs ΣPmin), `roundtrip` (the reloaded xlsx
+reproduces the profile for every load and slot).
+
+## Limitations
+
+- **Only the load shape is period-specific.** Generators, costs, line limits, reserves and
+  topology are the base case's. On `ieee39_uced` the line limits never bind and the unit costs
+  are nearly identical, so the LMP is the **same at every bus** — prices vary over time only.
+- **Magnitude is the test system's**: the reference year's regional peak is mapped onto the
+  base case's total load (New England's real peak is ~25 GW; `ieee39_uced` carries 4.7 GW).
+  All loads follow one regional curve with fixed shares.
+- **Data range** 2015-07 to 2022-06 (UTC); a period with any missing hour is refused.
+- **Routines**: ED over a month (744 slots) is verified. A whole year (8760 slots) has not
+  been run — expect a large problem. **UC / EDES over long horizons are very slow**
+  (mixed-integer; EDES took ~9 min for 168 slots on 5 buses) — keep them to days or a week.
+- **Summary sheet**: with LLM_LTB's current `week_case` (no `summary_rows`) the xlsx `Summary`
+  sheet still carries the base case's own load note; the period's source is in `.period.json`.
+- **Web**: built cases live in the server's memory; after a restart ask for the case again.
+  LLM_LTB's `/api/chat` pre-check may reject the request with a small local model (the CLI
+  has no pre-check).
+
+## Verification status (2026-10)
+
+- Tests: 53 passed (no LLM; data tests skip without the dataset).
+- llama3.1:8b, live: LLM_LTB's built-in classifications and plans are identical with and
+  without this plugin; `case_build` requests are recognized and planned.
+- Full month in the web app: *"Build the IEEE39 case for July 2020 and run ED"* — 744 slots,
+  ED converged, sidebar and report name the built case.
+- Not yet checked: OpenAI models; UC over a full month; a whole-year (8760-slot) case.
 
 ## Tests
 
