@@ -179,9 +179,17 @@ reproduces the profile for every load and slot).
 
 ## Verification status (2026-10)
 
-- Tests: 53 passed (no LLM; data tests skip without the dataset).
-- llama3.1:8b, live: LLM_LTB's built-in classifications and plans are identical with and
-  without this plugin; `case_build` requests are recognized and planned.
+- Tests: 56 passed (no LLM; data tests skip without the dataset).
+- llama3.1:8b, live routing (`scripts/live_routing.py`, 2026-10-27, 5 runs each): all 15
+  period-build phrasings (English and Chinese) reach `case_build`; "… and run ED" plans as
+  `case_build → configure(ED) → solve` (the `configure` step is redundant, harmless); the 8
+  built-in controls route identically with and without the plugin.
+- llama3.1:8b, end to end (`scripts/live_e2e.py`): 7 requests built the right case and solved
+  ED (744 slots). The planner's step sometimes adds a base case the user never named
+  ("… for the PJM 5-bus system"); the node keeps optional fields only when the user's own
+  message states them.
+- UC after a build fails with the default solver CLARABEL (not MIP) — the same as LLM_LTB's
+  built-in "switch to ieee39_uced and run UC"; ask for a MIP solver too.
 - Full month in the web app: *"Build the IEEE39 case for July 2020 and run ED"* — 744 slots,
   ED converged, sidebar and report name the built case.
 - Not yet checked: OpenAI models; UC over a full month; a whole-year (8760-slot) case.

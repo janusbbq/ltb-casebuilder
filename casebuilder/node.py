@@ -21,7 +21,7 @@ import re
 from datetime import datetime
 from typing import Dict, Optional
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.ams_engine.case_catalog import resolve_case
 from agent.schemas.response import NodeResponse
@@ -136,9 +136,21 @@ def parse_period(text: str) -> Dict[str, object]:
 def parse_base_case(text: str) -> Optional[str]:
     """Case catalog key for a case the user named explicitly, else ``None``."""
     m = _CASE_RE.search(text or "")
-    if not m:
-        return None
-    token = m.group(1)
+    return _case_key(m.group(1)) if m else None
+
+
+def _named_cases(text: str) -> set:
+    """Catalog keys of every case named in ``text``."""
+    keys = (_case_key(m.group(1)) for m in _CASE_RE.finditer(text or ""))
+    return {k for k in keys if k}
+
+
+def _named_regions(text: str) -> set:
+    t = (text or "").lower()
+    return {code for name, code in REGION_ALIASES.items() if name in t}
+
+
+def _case_key(token: str) -> Optional[str]:
     if token.lower().endswith(".xlsx"):
         return token
     res = resolve_case(re.sub(r"节点", " bus", token))
@@ -166,8 +178,15 @@ def _number_in_text(value, text: str) -> bool:
     return False
 
 
-def _extract_spec(text: str, llm, prompts, inputs) -> Optional[PeriodCaseSpec]:
-    """LLM proposal overridden by whatever the deterministic parser found."""
+def _extract_spec(text: str, llm, prompts, inputs,
+                  user_text: Optional[str] = None) -> Optional[PeriodCaseSpec]:
+    """LLM proposal overridden by whatever the deterministic parser found.
+
+    ``user_text``: in a planned turn ``text`` is the planner's step, the user's own message is
+    ``user_text``. The period comes from the step (a step may name one of several periods);
+    optional fields must be stated by the user.
+    """
+    said = text if user_text is None else user_text
     fields: Dict[str, object] = {}
     try:
         extractor = llm.with_structured_output(PeriodCaseSpec)
@@ -195,15 +214,52 @@ def _extract_spec(text: str, llm, prompts, inputs) -> Optional[PeriodCaseSpec]:
     for k in ("timezone", "region", "base_case"):
         fields.pop(k, None)                        # re-added below from the parser if stated
     for k in ("peak_mw", "ref_year"):
-        if fields.get(k) is not None and not _number_in_text(fields[k], text or ""):
+        if fields.get(k) is not None and not (_number_in_text(fields[k], text or "")
+                                              and _number_in_text(fields[k], said or "")):
             fields.pop(k)
+    # A planner step can carry words the user never said: with llama3.1:8b the step for "Build
+    # the IEEE39 case for July 2020 and run ED" read "... based on the 5bus/pjm5bus_demo.xlsx
+    # base case, for the PJM region" (the session's case). Keep an optional field from the step
+    # only if the user said it; if the step dropped it, take the user's when it is unambiguous.
+    if said is not text:
+        stated = parse_period(said)
+        if "timezone" in parsed and "timezone" not in stated:
+            parsed.pop("timezone")
+        elif "timezone" in stated:
+            parsed["timezone"] = stated["timezone"]
+        regions = _named_regions(said)
+        if parsed.get("region") not in regions:
+            parsed.pop("region", None)
+            if len(regions) == 1:
+                parsed["region"] = next(iter(regions))
     fields.update(parsed)
     named = parse_base_case(text)
+    if said is not text:
+        cases = _named_cases(said)
+        if named not in cases:
+            named = next(iter(cases)) if len(cases) == 1 else None
     if named:
         fields["base_case"] = named
     if "year" not in fields:
         return None
     return PeriodCaseSpec(**fields)
+
+
+def _user_text(state: State) -> Optional[str]:
+    """The user's own message of a planned turn, else ``None``.
+
+    LLM_LTB's step controller appends each step's ``content`` as a HumanMessage, so the user's
+    message is the HumanMessage just before the one carrying step 1.
+    """
+    plan = state.get("plan")
+    if not state.get("is_compound") or plan is None or not getattr(plan, "steps", None):
+        return None
+    first = plan.steps[0].content
+    humans = [m for m in state.get("messages") or [] if isinstance(m, HumanMessage)]
+    for i in range(len(humans) - 1, 0, -1):
+        if humans[i].content == first:
+            return humans[i - 1].content
+    return None
 
 
 def _reply(content: str, success: bool, data: dict):
@@ -219,7 +275,7 @@ def case_build_agent(state: State, llm, prompts, ams_ctx):
     inputs = state["inputs"]
 
     try:
-        spec = _extract_spec(text, llm, prompts, inputs)
+        spec = _extract_spec(text, llm, prompts, inputs, _user_text(state))
     except Exception as exc:                       # pydantic validation of the merged fields
         return _reply(f"I could not turn that into a valid period request: {exc}", False,
                       {"action": "invalid_spec"})
