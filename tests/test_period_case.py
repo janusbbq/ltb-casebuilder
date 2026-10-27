@@ -394,3 +394,41 @@ def test_extract_keeps_stated_optional_fields():
                      "peak_mw": 4000, "ref_year": 2019})
     assert spec.timezone == "utc" and spec.region == "NY"
     assert spec.peak_mw == 4000 and spec.ref_year == 2019
+
+
+def _extract_step(step, user, proposal=None):
+    from casebuilder.node import _extract_spec
+    inputs = create_initial_state(case_path="5bus/pjm5bus_demo.xlsx")["inputs"]
+    return _extract_spec(step, StubLLM({"PeriodCaseSpec": proposal or {}}),
+                         get_prompts() | CASE_BUILD.prompts, inputs, user)
+
+
+def test_extract_planner_step_cannot_add_optional_fields():
+    # llama3.1:8b planner step, seen live 2026-10-27 (user named no base case here)
+    step = ("Build a case for July 2020, using real load data for the month, based on the "
+            "5bus/pjm5bus_demo.xlsx base case, for the PJM region, in UTC")
+    spec = _extract_step(step, "Generate a July 2020 case and run ED")
+    assert (spec.year, spec.month) == (2020, 7)
+    assert spec.base_case == "ieee39_uced" and spec.region == "NE" and spec.timezone == "local"
+
+
+def test_extract_planner_step_keeps_what_the_user_said():
+    # the step dropped the user's base case, region and time zone; the user's words win
+    spec = _extract_step("build case for 2020 July", "生成2020年7月的pjm5bus算例，用new york负荷，UTC，并运行ED")
+    assert spec.base_case == "pjm5bus" and spec.region == "NY" and spec.timezone == "utc"
+    # a step naming one of several stated regions keeps it
+    spec = _extract_step("build July 2020 from New York load",
+                         "build July 2020 cases from New England and New York load and run ED")
+    assert spec.region == "NY"
+
+
+def test_user_text_of_a_planned_turn():
+    from casebuilder.node import _user_text
+    from agent.schemas.planner import MultiStepPlan
+    st = _state("Build the IEEE39 case for July 2020 and run ED")
+    assert _user_text(st) is None
+    st["plan"] = MultiStepPlan(description="d", steps=[
+        {"action": "solve", "content": "build July 2020"}, {"action": "solve", "content": "run ED"}])
+    st["is_compound"] = True
+    st["messages"].append(HumanMessage(content="build July 2020"))
+    assert _user_text(st) == "Build the IEEE39 case for July 2020 and run ED"
